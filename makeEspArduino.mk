@@ -164,17 +164,22 @@ SKETCH_DIR = $(dir $(SKETCH))
 ifeq ($(LIBS),)
   # Automatically find directories with header files used by the sketch
   LIBS := $(shell perl -e 'use File::Find;@d = split(" ", shift);while (<>) {$$f{"$$1"} = 1 if /^\s*\#include\s+[<"]([^>"]+)/;}find(sub {if ($$f{$$_}){print $$File::Find::dir," ";$$f{$$_}=0;}}, @d);' \
-	                        "$(CUSTOM_LIBS) $(ESP_LIBS) $(ARDUINO_LIBS)" $(SKETCH) $(call find_files,S|c|cpp,$(SKETCH_DIR)))
+	                        "$(CUSTOM_LIBS) $(ESP_LIBS) $(ARDUINO_LIBS)" $(call find_files,S|c|cpp,$(SKETCH_DIR)))
 endif
 
 IGNORE_PATTERN := $(foreach dir,$(EXCLUDE_DIRS),$(dir)/%)
 USER_INC := $(filter-out $(IGNORE_PATTERN),$(call find_files,h,$(SKETCH_DIR) $(dir $(LIBS))))
+#USER_SRC := $(SKETCH) $(filter-out $(IGNORE_PATTERN),$(call find_files,S|c|cpp,$(SKETCH_DIR)))
 USER_SRC := $(SKETCH) $(filter-out $(IGNORE_PATTERN),$(call find_files,S|c|cpp,$(SKETCH_DIR) $(LIBS)))
 # Object file suffix seems to be significant for the linker...
 USER_OBJ := $(subst .ino,_.cpp,$(patsubst %,$(BUILD_DIR)/%$(OBJ_EXT),$(notdir $(USER_SRC))))
 USER_DIRS := $(sort $(dir $(USER_SRC)))
 USER_INC_DIRS := $(sort $(dir $(USER_INC)))
 USER_LIBS := $(filter-out $(IGNORE_PATTERN),$(call find_files,a,$(SKETCH_DIR) $(LIBS)))
+
+EXT_SRC := $(filter-out $(IGNORE_PATTERN),$(call find_files,S|c|cpp,$(LIBS)))
+EXT_OBJ := $(patsubst %,$(BUILD_DIR)/%$(OBJ_EXT),$(notdir $(EXT_SRC)))
+EXT_DIRS := $(sort $(dir $(EXT_SRC)))
 
 # Use first flash definition for the board as default
 FLASH_DEF_MATCH = $(if $(filter $(CHIP), esp32),build\.flash_size=(\S+),menu\.(?:FlashSize|eesz)\.([^\.]+)=(.+))
@@ -211,7 +216,7 @@ $(ARDUINO_MK): $(ARDUINO_DESC) $(MAKEFILE_LIST) | $(BUILD_DIR)
 # Compilation directories and path
 INCLUDE_DIRS += $(CORE_DIR) $(ESP_ROOT)/variants/$(INCLUDE_VARIANT) $(BUILD_DIR)
 C_INCLUDES := $(foreach dir,$(INCLUDE_DIRS) $(USER_INC_DIRS),-I$(dir))
-VPATH += $(shell find $(CORE_DIR) -type d) $(USER_DIRS)
+VPATH += $(shell find $(CORE_DIR) -type d) $(EXT_DIRS) $(USER_DIRS)
 
 # Automatically generated build information data
 # Makes the build date and git descriptions at the actual build event available as string constants in the program
@@ -239,7 +244,7 @@ $(BUILD_DIR)/%.S$(OBJ_EXT): %.S $(ARDUINO_MK)
 	echo  $(<F)
 	$(S_COM) $(S_EXTRA) $< -o $@
 
-$(CORE_LIB): $(CORE_OBJ)
+$(CORE_LIB): $(CORE_OBJ) $(EXT_OBJ)
 	echo  Creating core archive
 	rm -f $@
 	$(CORE_LIB_COM) $^
