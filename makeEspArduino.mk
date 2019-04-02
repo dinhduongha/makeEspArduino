@@ -28,7 +28,6 @@ BOARD ?= $(if $(filter $(CHIP), esp32),esp32,generic)
 # Serial flashing parameters
 UPLOAD_PORT ?= $(shell ls -1tr /dev/tty*USB* 2>/dev/null | tail -1)
 UPLOAD_PORT := $(if $(UPLOAD_PORT),$(UPLOAD_PORT),/dev/ttyS0)
-UPLOAD_VERB ?= -v
 
 # OTA parameters
 ESP_ADDR ?= ESP_123456
@@ -63,7 +62,7 @@ OS ?= $(shell uname -s)
 git_description = $(shell git -C  $(1) describe --tags --always --dirty 2>/dev/null || echo Unknown)
 time_string = $(shell date +$(1))
 ifeq ($(OS), Darwin)
-  find_files = $(shell find -E $2 -regex ".*\.($1)")
+  find_files = $(shell find -E $2 -regex ".*\.($1)" | sed 's/\/\//\//')
 else
   find_files = $(shell find $2 -regextype posix-egrep -regex ".*\.($1)")
 endif
@@ -87,7 +86,7 @@ ifndef ESP_ROOT
   ESP_ARDUINO_VERSION := $(notdir $(ESP_ROOT))
   # Find used version of compiler and tools
   COMP_PATH := $(lastword $(wildcard $(ARDUINO_ESP_ROOT)/tools/xtensa-*/*))
-  ESPTOOL_PATH := $(lastword $(wildcard $(ARDUINO_ESP_ROOT)/tools/esptool/*))
+  ESPTOOL_PATH := $(lastword $(wildcard $(ARDUINO_ESP_ROOT)/tools/esptool*/*))
   MKSPIFFS_PATH := $(lastword $(wildcard $(ARDUINO_ESP_ROOT)/tools/mkspiffs/*/*))
 else
   # Location defined, assume it is a git clone
@@ -133,9 +132,10 @@ endif
 SRC_GIT_VERSION := $(call git_description,$(dir $(SKETCH)))
 
 # Main output definitions
-MAIN_NAME := $(basename $(notdir $(SKETCH)))
-MAIN_EXE = $(BUILD_DIR)/$(MAIN_NAME).bin
-FS_IMAGE = $(BUILD_DIR)/FS.spiffs
+SKETCH_NAME := $(basename $(notdir $(SKETCH)))
+MAIN_NAME ?= $(SKETCH_NAME)
+MAIN_EXE ?= $(BUILD_DIR)/$(MAIN_NAME).bin
+FS_IMAGE ?= $(BUILD_DIR)/FS.spiffs
 
 ifeq ($(OS), Windows_NT)
   # Adjust some paths for cygwin
@@ -203,7 +203,7 @@ EXT_DIRS := $(sort $(dir $(EXT_SRC)))
 FLASH_DEF_MATCH = $(if $(filter $(CHIP), esp32),build\.flash_size=(\S+),menu\.(?:FlashSize|eesz)\.([^\.]+)=(.+))
 FLASH_DEF ?= $(shell cat $(ESP_ROOT)/boards.txt | perl -e 'while (<>) {if (/^$(BOARD)\.$(FLASH_DEF_MATCH)/){ print "$$1"; exit;}}')
 # Same method for LwIPVariant
-LWIP_VARIANT ?= $(shell cat $(ESP_ROOT)/boards.txt | perl -e 'while (<>) {if (/^$(BOARD)\.menu\.LwIPVariant\.([^\.=]+)=/){ print "$$1"; exit;}}')
+LWIP_VARIANT ?= $(shell cat $(ESP_ROOT)/boards.txt | perl -e 'while (<>) {if (/^$(BOARD)\.menu\.(?:LwIPVariant|ip)\.([^\.=]+)=/){ print "$$1"; exit;}}')
 
 # Handle possible changed state i.e. make command line parameters or changed git versions
 ifeq ($(OS), Darwin)
@@ -362,6 +362,10 @@ list_flash_defs:
 	echo === Memory configurations for board: $(BOARD) ===
 	cat $(ESP_ROOT)/boards.txt | perl -e 'while (<>) { if (/^$(BOARD)\.$(FLASH_DEF_MATCH)/){ print sprintf("%-10s %s\n", $$1,$$2);} }'
 
+list_lwip:
+	echo === lwip configurations for board: $(BOARD) ===
+	cat $(ESP_ROOT)/boards.txt | perl -e 'while (<>) { if (/^$(BOARD)\.menu\.(?:LwIPVariant|ip)\.(\w+)=(.+)/){ print sprintf("%-10s %s\n", $$1,$$2);} }'
+
 help: $(ARDUINO_MK)
 	echo
 	echo "Generic makefile for building Arduino esp8266 and esp32 projects"
@@ -406,6 +410,7 @@ help: $(ARDUINO_MK)
 	echo "  FLASH_FILE           File name for dump and restore flash operations"
 	echo "                          Default: '$(FLASH_FILE)'"
 	echo "  LWIP_VARIANT         Use specified variant of the lwip library when applicable"
+	echo "                         Use 'list_lwip' to get list of available ones"
 	echo "                         Default: $(LWIP_VARIANT) ($(LWIP_INFO))"
 	echo "  VERBOSE              Set to 1 to get full printout of the build"
 	echo "  BUILD_THREADS        Number of parallel build threads"
@@ -485,7 +490,7 @@ foreach my $$fn (@ARGV) {
       $$key =~ s/$$board\.menu\.baud\.[^\.]+\.//;
       $$key =~ s/$$board\.menu\.ResetMethod\.[^\.]+\.//;
       $$key =~ s/$$board\.menu\.FlashMode\.[^\.]+\.//;
-      $$key =~ s/$$board\.menu\.LwIPVariant\.$$lwipvariant\.//;
+      $$key =~ s/$$board\.menu\.(?:LwIPVariant|ip)\.$$lwipvariant\.//;
       $$key =~ s/^$$board\.//;
       $$v{$$key} ||= $$val;
       $$v{$$1} = $$v{$$key} if $$key =~ /(.+)\.$$os$$/;
@@ -505,7 +510,6 @@ def_var('build.flash_freq', 'FLASH_SPEED');
 def_var('upload.resetmethod', 'UPLOAD_RESET');
 def_var('upload.speed', 'UPLOAD_SPEED');
 def_var('compiler.warning_flags', 'COMP_WARNINGS');
-$$v{'upload.verbose'} = '$$(UPLOAD_VERB)';
 $$v{'serial.port'} = '$$(UPLOAD_PORT)';
 $$v{'recipe.objcopy.hex.pattern'} =~ s/[^"]+\/bootloaders\/eboot\/eboot.elf/\$$(BOOT_LOADER)/;
 $$v{'recipe.objcopy.hex.1.pattern'} =~ s/[^"]+\/bootloaders\/eboot\/eboot.elf/\$$(BOOT_LOADER)/;
@@ -568,8 +572,9 @@ print "VTABLE_FLAGS?=$$v{'build.vtable_flags'}\n";
 print "LINK_PREBUILD=$$v{'recipe.hooks.linking.prelink.1.pattern'}\n";
 print "MEM_FLASH=$$v{'recipe.size.regex'}\n";
 print "MEM_RAM=$$v{'recipe.size.regex.data'}\n";
-print "FLASH_INFO=$$v{'menu.FlashSize.' . $$flashSize}\n";
-print "LWIP_INFO=$$v{'menu.LwIPVariant.' . $$lwipvariant}\n";
+$$flash_info = $$v{'menu.FlashSize.' . $$flashSize} || $$v{'menu.eesz.' . $$flashSize};
+print "FLASH_INFO=$$flash_info\n";
+print "LWIP_INFO=", $$v{'menu.LwIPVariant.' . $$lwipvariant} || $$v{'menu.ip.' . $$lwipvariant}, "\n";
 endef
 export PARSE_ARDUINO
 
