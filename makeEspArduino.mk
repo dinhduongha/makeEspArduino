@@ -136,6 +136,7 @@ SKETCH_NAME := $(basename $(notdir $(SKETCH)))
 MAIN_NAME ?= $(SKETCH_NAME)
 MAIN_EXE ?= $(BUILD_DIR)/$(MAIN_NAME).bin
 FS_IMAGE ?= $(BUILD_DIR)/FS.spiffs
+PARTITIONS ?= $(BUILD_DIR)/$(MAIN_NAME).partitions.bin
 
 ifeq ($(OS), Windows_NT)
   # Adjust some paths for cygwin
@@ -285,6 +286,8 @@ $(MAIN_EXE): $(CORE_LIB) $(USER_LIBS) $(USER_OBJ)
 	$(GEN_PART_COM)
 	$(ELF2BIN_COM)
 	$(SIZE_COM) | perl -e "$$MEM_USAGE" "$(MEM_FLASH)" "$(MEM_RAM)"
+	$(IDF_PATH)/components/esptool_py/esptool/espsecure.py sign_data --keyfile $(HOME)/work/Arduino/esp32/secure-boot/one-time/secure_boot_signing_key.pem $(MAIN_EXE)
+	$(IDF_PATH)/components/esptool_py/esptool/espsecure.py sign_data --keyfile $(HOME)/work/Arduino/esp32/secure-boot/one-time/secure_boot_signing_key.pem $(PARTITIONS)
 ifneq ($(LWIP_INFO),)
 	printf "LwIPVariant: $(LWIP_INFO)\n"
 endif
@@ -294,6 +297,7 @@ endif
 	perl -e 'print "Build complete. Elapsed time: ", time()-$(START_TIME),  " seconds\n\n"'
 
 upload flash: all
+	echo $(UPLOAD_COM)
 	$(UPLOAD_COM)
 
 ota: all
